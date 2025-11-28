@@ -1,0 +1,69 @@
+!pip install pykan # Installs pykan package-official implementaton of KAN
+import pandas as pd, numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import accuracy_score, confusion_matrix, ConfusionMatrixDisplay
+import matplotlib.pyplot as plt
+import torch#for building and training the model
+from kan import KAN
+
+# Load & clean
+df = pd.read_csv('/content/drive/MyDrive/dataset/wisconsin_breast_cancer.csv')
+#axis=0 for rows and axis=1 for coloumns
+#inplace=true modify original dataframe directly
+df.drop('id', axis=1, inplace=True)
+df.replace('?', np.nan, inplace=True)
+df.dropna(inplace=True)#drops empty rows
+df['nuclei'] = pd.to_numeric(df['nuclei'])
+X = df.drop('class', axis=1).values
+y = df['class'].astype(int).values
+
+# Normalize and split
+X = StandardScaler().fit_transform(X)
+Xtr, Xte, ytr, yte = train_test_split(X, y, test_size=0.2, random_state=42)
+#converts the training input features into a PyTorch tensor of type float32
+Xtr_t = torch.tensor(Xtr, dtype=torch.float32)
+Xte_t = torch.tensor(Xte, dtype=torch.float32)
+ytr_t = torch.tensor(ytr, dtype=torch.float32).unsqueeze(1)
+yte_t = torch.tensor(yte, dtype=torch.float32).unsqueeze(1)
+#.unsqueeze(1) reshapes the labels from shape (n,) to (n, 1) (i.e., adds a column dimension)
+
+# Initialize KAN — no init_grid needed
+model = KAN(width=[Xtr.shape[1], 16, 1], grid=10, k=5, device='cpu')
+#shape[1]means no of features(columns),16 input neurons ,1 output neuron,
+#grid=10(no of points in activation curve),k=5(no of considered grid points),chooses either gpu or cpu
+
+# Train
+#adam is an optimizer algorithm which updates the model's weights to minimize the loss
+opt = torch.optim.Adam(model.parameters(), lr=0.0005)
+#loss function to find how well the model is performing
+#BCEWithLogitsLoss() combines sigmoid curve with binary cross entropy
+loss_fn = torch.nn.BCEWithLogitsLoss()
+for epoch in range(50):
+    model.train()
+    #passes training dataset through model
+    logits = model(Xtr_t)
+    #compares models predictions(logits) with true values(ytr_t)
+    loss = loss_fn(logits, ytr_t)
+    opt.zero_grad();loss.backward(); opt.step()
+    #clears old gradient#calculate gradient of loss#update parameters  using gradient
+    print(f"Epoch {epoch+1}, Loss={loss.item():.4f}")
+
+# Evaluate
+model.eval()
+#turns off gradient tracking
+with torch.no_grad():
+  #passing the test input data
+    logits = model(Xte_t)
+    #apply sigmoid activation function to logits
+    preds = torch.sigmoid(logits)
+    ypred = (preds > 0.5).int().numpy()
+acc = accuracy_score(yte, ypred)
+print(f"Test Accuracy: {acc:.4f}")
+
+# Confusion matrix
+cm = confusion_matrix(yte, ypred)
+disp = ConfusionMatrixDisplay(cm)
+disp.plot(cmap='Blues'); 
+plt.title("Confusion Matrix"); 
+plt.show()
